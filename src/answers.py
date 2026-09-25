@@ -531,7 +531,10 @@ async def _llm_text_answer(
 ) -> str | None:
     """Call Groq with the retrieved context. Returns None on any failure so
     the caller can fall back to a plain excerpt."""
-    api_key = (os.getenv("GROQ_API_KEY") or "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").strip()
+    api_key = (
+        os.getenv("GROQ_API_KEY")
+        or ""
+    ).strip()
     if not api_key:
         Actor.log.warning("GROQ_API_KEY is not set; using fallback answer.")
         return None
