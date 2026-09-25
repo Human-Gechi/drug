@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.router import BASE, plan_query
 from src.utils import normalize_domain
@@ -26,17 +26,29 @@ def _parse_start_urls(value: Any) -> List[str]:
     return list(dict.fromkeys(urls))
 
 
+def _as_positive_int(value: Any) -> Optional[int]:
+    if value in (None, "", 0):
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 1 else None
+
+
 @dataclass
 class AppConfig:
     start_urls: List[str]
     allowed_domains: List[str]
     max_pages: int = 200
     crawl_depth: int = 2
-    page_timeout_ms: int = 45_000
+    page_timeout_ms: int = 20_000
     query: str = ""
     ai_model: str = "openai/gpt-oss-120b"
     debug_html: bool = False
-    greenbook_terms: List[str] = None  # product/ingredient terms to search on greenbook.nafdac.gov.ng
+    greenbook_terms: List[str] = None
+    max_results: Optional[int] = None
+    default_max_results: Optional[int] = None
 
     @classmethod
     def from_input(cls, raw: Dict[str, Any]) -> "AppConfig":
@@ -57,17 +69,18 @@ class AppConfig:
         domains.append(normalize_domain(BASE))
         allowed_domains = list(dict.fromkeys(domains))
 
-        # Routed seeds are already targeted, so default to a shallower, faster crawl.
-        default_depth, default_pages = (1, 80) if routed else (2, 200)
+        default_depth, default_pages = (2, 60) if routed else (2, 150)
 
         return cls(
             start_urls=start_urls,
             allowed_domains=allowed_domains,
             max_pages=int(raw.get("maxPages") or default_pages),
             crawl_depth=int(raw.get("crawlDepth") or default_depth),
-            page_timeout_ms=int(raw.get("pageTimeoutMs") or 45_000),
+            page_timeout_ms=int(raw.get("pageTimeoutMs") or 20_000),
             query=query,
-            ai_model=str(raw.get("aiModel") or "openai/gpt-oss-120b").strip(),
+            ai_model="openai/gpt-oss-120b",  
             debug_html=bool(raw.get("debugHtml", False)),
             greenbook_terms=greenbook_terms,
+            max_results=_as_positive_int(raw.get("maxResults")),
+            default_max_results=_as_positive_int(raw.get("defaultMaxResults"))
         )

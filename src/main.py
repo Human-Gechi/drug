@@ -1,17 +1,26 @@
 import asyncio
 import json
 import sys
+from typing import Any, Dict, List
 
 from apify import Actor
 
-from src.answers import answer_question, collect_links, format_links
+from src.answers import answer_question
 from src.config import AppConfig
 from src.crawler import crawl_site
-from src.retrieval import priority_terms, rank_documents
+from src.retrieval import is_list_query, priority_terms, rank_documents
+
+PUSH_BATCH_SIZE = 50
+
+
+async def _push_batched(records: List[Dict[str, Any]]) -> None:
+    if not records:
+        return
+    for i in range(0, len(records), PUSH_BATCH_SIZE):
+        await Actor.push_data(records[i : i + PUSH_BATCH_SIZE])
 
 
 async def main() -> None:
-    # Windows consoles for the apfiy platform default to cp1252 and crash on characters like \u202f.
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -30,57 +39,51 @@ async def main() -> None:
             page_timeout_ms=config.page_timeout_ms,
             debug_html=config.debug_html,
             priority_terms=priority_terms(config.query),
-            greenbook_terms=config.greenbook_terms,
+            greenbook_terms=config.greenbook_terms
         )
 
-        for doc in documents:
-            await Actor.push_data({"type": "page", **doc.to_item()})
-
-        summary = {
-            "type": "summary",
-            "crawledPages": len(documents),
-            "alertsFound": sum(len(d.alerts) for d in documents),
-            "tableRows": sum(len(t.get("rows", [])) for d in documents for t in d.tables),
-            "crawledUrls": [d.url for d in documents],
-            "startUrls": config.start_urls,
-            "allowedDomains": config.allowed_domains,
-        }
+        Actor.log.info("crawled %d page(s)", len(documents))
 
         if config.query:
-            ranked = rank_documents(config.query, documents, top_k=6)
-            answer = await answer_question(config.query, ranked, config.ai_model)
-            links = collect_links(config.query, ranked)
-            links_text = format_links(links)
-            if links_text:
-                answer = f"{answer}\n\n{links_text}"
+            top_k = 40 if is_list_query(config.query) else 12
+            ranked = rank_documents(config.query, documents, top_k=top_k)
+            result = await answer_question(
+                config.query,
+                ranked,
+                config.ai_model,
+                max_results=config.max_results,
+                default_max_results=config.default_max_results,
+            )
+            output: Dict[str, Any] = {
+                "type": "answer",
+                "query": config.query,
+                "answerType": result["answerType"],
+                "answer": result["answer"],
+                "recordCount": result.get("recordCount", 0),
+                "answerDetail": result["answerDetail"],
+                "sources": result["sources"],
+                "notes": result["notes"]
+            }
+        else:
+            output = {
+                "type": "answer",
+                "query": "",
+                "answerType": "none",
+                "answer": f"No question was asked. {len(documents)} NAFDAC page(s) were crawled.",
+                "recordCount": 0,
+                "answerDetail": None,
+                "sources": [],
+                "notes": []
+            }
 
-            sources, seen = [], set()
-            for item in ranked:
-                url = item["document"].url
-                if url in seen:
-                    continue
-                seen.add(url)
-                sources.append(
-                    {
-                        "url": url,
-                        "title": item["document"].title,
-                        "kind": item.get("kind"),
-                        "score": item["score"],
-                        "excerpt": (item.get("chunk") or "")[:300],
-                    }
-                )
-                if len(sources) >= 10:
-                    break
+        # Only one record per run goes into the default dataset.
+        await Actor.push_data(output)
 
-            result = {"type": "answer", "query": config.query, "answer": answer, "links": links, "sources": sources}
-            await Actor.push_data(result)
-            summary = {**summary, **result}
-
-        await Actor.push_data(summary)
+        await Actor.set_value("OUTPUT", output)
         try:
-            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            print(json.dumps(output, ensure_ascii=False, indent=2))
         except UnicodeEncodeError:
-            print(json.dumps(summary, ensure_ascii=True, indent=2))
+            print(json.dumps(output, ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":

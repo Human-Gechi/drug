@@ -16,8 +16,42 @@ GREENBOOK_PATTERNS = {
     "status": r"^\s*(?:registration\s*)?status\s*[:\-]\s*(.+)$",
     "active_ingredient": r"^\s*active\s*ingredients?\s*[:\-]\s*(.+)$",
     "dosage_form": r"^\s*dosage\s*form\s*[:\-]\s*(.+)$",
-    "expiry": r"^\s*(?:expiry|expiration)(?:\s*date)?\s*[:\-]\s*(.+)$"
+    "expiry": r"^\s*(?:expiry|expiration)(?:\s*date)?\s*[:\-]\s*(.+)$",
+    "strength": r"^\s*strength(?:s)?\s*[:\-]\s*(.+)$",
+    "approval_date": r"^\s*(?:approval\s*date|date\s*of\s*approval|registration\s*date|date\s*registered)\s*[:\-]\s*(.+)$",
+    "product_category": r"^\s*(?:product\s*category|category)\s*[:\-]\s*(.+)$",
 }
+
+# Maps the raw regex field names above onto the flatter, user-facing names used in the
+# "registrations" dataset/view (e.g. GREENBOOK_PATTERNS' "registration_number" -> "nrn").
+# Where two raw fields map onto the same output name (manufacturer / MA holder), the first
+# one present wins.
+GREENBOOK_FIELD_MAP = {
+    "product_name": "product_name",
+    "registration_number": "nrn",
+    "active_ingredient": "active_ingredients",
+    "dosage_form": "form",
+    "strength": "strengths",
+    "manufacturer": "applicant_name",
+    "marketing_authorization_holder": "applicant_name",
+    "approval_date": "approval_date",
+    "product_category": "product_category",
+    "status": "status",
+    "expiry": "expiry"
+}
+
+
+def map_greenbook_fields(gb: Dict[str, Any]) -> Dict[str, Any]:
+    """Rename a raw greenbook record (regex field names) to the output-facing field names."""
+    mapped: Dict[str, Any] = {}
+    for src_key, value in gb.items():
+        if src_key in ("hint", "excerpt"):
+            continue
+        dest = GREENBOOK_FIELD_MAP.get(src_key, src_key)
+        if dest not in mapped:
+            mapped[dest] = value
+    return mapped
+
 
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
 DATE_RE = re.compile(rf"(?:{MONTHS})\s+\d{{1,2}},\s+\d{{4}}")
@@ -39,7 +73,7 @@ class PageDocument:
     tables: List[Dict[str, Any]]
     greenbook: Optional[Dict[str, Any]]
     alerts: List[Dict[str, Any]] = field(default_factory=list)
-    resources: List[Dict[str, Any]] = field(default_factory=list)  # PDFs, documents, iframes/embeds
+    resources: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_item(self) -> Dict[str, Any]:
         return {
@@ -59,7 +93,7 @@ def extract_greenbook(text: str, tables: List[Dict[str, Any]]) -> Optional[Dict[
     table_lines: List[str] = []
 
     for table in tables:
-        if len(table.get("rows", [])) > 3: 
+        if len(table.get("rows", [])) > 3:
             continue
         for row in table.get("rows", []):
             if not isinstance(row, dict):
@@ -89,10 +123,13 @@ def extract_greenbook(text: str, tables: List[Dict[str, Any]]) -> Optional[Dict[
 
 
 def extract_links(soup: BeautifulSoup, base_url: str) -> List[str]:
-    """Links from <a>, <area>, iframes/embeds/objects, data-href attrs and onclick handlers."""
+    """Links from <a>, <area>, iframes/embeds/objects, data-* attributes,
+    onclick handlers, and any element with a data-url-like attribute."""
     found: List[str] = []
+
     for el in soup.find_all(True):
         candidates: List[Optional[str]] = []
+
         if el.name in ("a", "area"):
             candidates.append(el.get("href"))
         elif el.name in ("iframe", "embed", "source"):
@@ -100,7 +137,7 @@ def extract_links(soup: BeautifulSoup, base_url: str) -> List[str]:
         elif el.name == "object":
             candidates.append(el.get("data"))
 
-        for attr in ("data-href", "data-url", "data-link"):
+        for attr in ("data-href", "data-url", "data-link", "data-file", "data-pdf"):
             candidates.append(el.get(attr))
 
         onclick = el.get("onclick")
@@ -125,35 +162,52 @@ DOC_EXT = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv")
 
 
 def extract_resources(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
-    """Documents (PDF/Word/Excel links) and embedded content (iframes, embeds) with readable labels."""
+    """Documents (PDF/Word/Excel) and embedded content (iframes, embeds).
+
+    Reads the URL from any of href / data-href / data-url / data-link /
+    onclick / src / data, because NAFDAC's card widgets often place the PDF
+    URL on a wrapping <div> or <button> rather than on a plain <a href>."""
     found: List[Dict[str, Any]] = []
     seen = set()
-    for el in soup.find_all(["a", "iframe", "embed", "object"]):
+
+    for el in soup.find_all(["a", "iframe", "embed", "object", "button", "div", "span"]):
         if el.find_parent(["nav", "footer", "aside"]):
             continue
-        if el.name == "a":
-            raw = el.get("href")
-        elif el.name == "object":
-            raw = el.get("data")
-        else:
-            raw = el.get("src")
-        raw = (raw or "").strip()
-        if not raw or raw.startswith(("mailto:", "tel:", "javascript:", "#")):
-            continue
-        url = canonicalize_url(raw, base_url)
-        if not url or url in seen:
-            continue
-        path = urlparse(url).path.lower()
-        if el.name == "a":
-            if not path.endswith(DOC_EXT):
+
+        raw_candidates: List[str] = []
+        for attr in ("href", "data-href", "data-url", "data-link", "src", "data"):
+            v = el.get(attr)
+            if v:
+                raw_candidates.append(v)
+        onclick = el.get("onclick")
+        if onclick:
+            m = ONCLICK_URL_RE.search(onclick)
+            if m:
+                raw_candidates.append(m.group(1))
+
+        for raw in raw_candidates:
+            raw = (raw or "").strip()
+            if not raw or raw.startswith(("mailto:", "tel:", "javascript:", "#")):
                 continue
-            kind = path.rsplit(".", 1)[-1]
-            text = clean_text(el.get_text(" ", strip=True)).replace("\n", " ")
-        else:
-            kind, text = "embed", ""
-        text = text or el.get("title") or el.get("aria-label") or path.rsplit("/", 1)[-1] or url
-        seen.add(url)
-        found.append({"text": text[:200], "url": url, "type": kind})
+            url = canonicalize_url(raw, base_url)
+            if not url or url in seen:
+                continue
+
+            path = urlparse(url).path.lower()
+
+            if path.endswith(DOC_EXT):
+                kind = path.rsplit(".", 1)[-1]
+                text = clean_text(el.get_text(" ", strip=True)).replace("\n", " ")
+                text = text or el.get("title") or el.get("aria-label") or path.rsplit("/", 1)[-1] or url
+                seen.add(url)
+                found.append({"text": text[:200], "url": url, "type": kind})
+                continue
+
+            if el.name in ("iframe", "embed", "object") and (el.get("src") or el.get("data")):
+                text = el.get("title") or el.get("aria-label") or path.rsplit("/", 1)[-1] or url
+                seen.add(url)
+                found.append({"text": text[:200], "url": url, "type": "embed"})
+
     return found
 
 
@@ -172,13 +226,12 @@ def extract_alerts(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
         url = canonicalize_url(href, base_url)
         if not url:
             continue
-        # Menu items and category index links are not alerts.
         if "/category/" in urlparse(url).path:
             continue
         if a.find_parent(["nav", "footer", "aside"]):
             continue
         if a.find_parent("header") and not a.find_parent("article"):
-            continue  # site header; an <article>'s own <header> is a real card title
+            continue
 
         date = None
         in_title = DATE_RE.search(title)
@@ -187,7 +240,7 @@ def extract_alerts(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
             title = re.sub(r"\s+", " ", DATE_RE.sub("", title)).strip(" |-–:")
         else:
             node = a.parent
-            for _ in range(5):  # climb to the card that holds exactly one date
+            for _ in range(5):
                 if node is None or node.name in ("body", "html"):
                     break
                 dates = DATE_RE.findall(node.get_text(" ", strip=True))
@@ -206,15 +259,13 @@ def extract_alerts(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
         m = ALERT_NO_RE.search(title)
         card = a.find_parent("article")
         excerpt = clean_text(card.get_text(" ", strip=True)).replace("\n", " ")[:300] if card else ""
-        alerts.append(
-            {
-                "date": date,
-                "alert_no": re.sub(r"\s+", "", m.group(1)) if m else None,
-                "title": title,
-                "url": url,
-                "excerpt": excerpt
-            }
-        )
+        alerts.append({
+            "date": date,
+            "alert_no": re.sub(r"\s+", "", m.group(1)) if m else None,
+            "title": title,
+            "url": url,
+            "excerpt": excerpt
+        })
     return alerts
 
 
@@ -227,13 +278,11 @@ def extract_page_document(url: str, html: str) -> PageDocument:
 
     title = clean_text(soup.title.get_text(" ", strip=True)) if soup.title else ""
 
-    # Extract links / alerts / tables BEFORE removing tags from the tree.
     links = extract_links(soup, url)
     alerts = extract_alerts(soup, url)
     tables = extract_tables(soup, url)
     resources = extract_resources(soup, url)
 
-    # Pick the main content region (tried in order, so a listing page isn't reduced to its first <article>).
     container = None
     for sel in ("main", ".entry-content", "#content", "#primary"):
         container = soup.select_one(sel)
