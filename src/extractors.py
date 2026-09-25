@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -37,13 +37,13 @@ GREENBOOK_FIELD_MAP = {
     "approval_date": "approval_date",
     "product_category": "product_category",
     "status": "status",
-    "expiry": "expiry"
+    "expiry": "expiry",
 }
 
 
-def map_greenbook_fields(gb: Dict[str, Any]) -> Dict[str, Any]:
+def map_greenbook_fields(gb: dict[str, Any]) -> dict[str, Any]:
     """Rename a raw greenbook record (regex field names) to the output-facing field names."""
-    mapped: Dict[str, Any] = {}
+    mapped: dict[str, Any] = {}
     for src_key, value in gb.items():
         if src_key in ("hint", "excerpt"):
             continue
@@ -55,13 +55,34 @@ def map_greenbook_fields(gb: Dict[str, Any]) -> Dict[str, Any]:
 
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
 DATE_RE = re.compile(rf"(?:{MONTHS})\s+\d{{1,2}},\s+\d{{4}}")
-ALERT_HINT_RE = re.compile(r"alert|recall|notice|warning|advisory|FSN|withdraw(?:n|al)|seizure|banned|suspend", re.I)
-ALERT_NO_RE = re.compile(
-    r"(?:Public\s+Alert|Recall|Alert)\s*(?:No\.?|Number)?\s*:?\s*(\d+\s*/\s*\d{4})", re.I
+ALERT_HINT_RE = re.compile(
+    r"alert|recall|notice|warning|advisory|FSN|withdraw(?:n|al)|seizure|banned|suspend",
+    re.IGNORECASE,
 )
-ONCLICK_URL_RE = re.compile(r"""(?:location(?:\.href)?\s*=|window\.open\(|open\()\s*['"]([^'"]+)['"]""")
-SKIP_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".css", ".js",
-            ".woff", ".woff2", ".ttf", ".mp4", ".mp3", ".zip")
+ALERT_NO_RE = re.compile(
+    r"(?:Public\s+Alert|Recall|Alert)\s*(?:No\.?|Number)?\s*:?\s*(\d+\s*/\s*\d{4})",
+    re.IGNORECASE,
+)
+ONCLICK_URL_RE = re.compile(
+    r"""(?:location(?:\.href)?\s*=|window\.open\(|open\()\s*['"]([^'"]+)['"]"""
+)
+SKIP_EXT = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".css",
+    ".js",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".mp4",
+    ".mp3",
+    ".zip",
+)
 
 
 @dataclass
@@ -69,13 +90,13 @@ class PageDocument:
     url: str
     title: str
     text: str
-    links: List[str]
-    tables: List[Dict[str, Any]]
-    greenbook: Optional[Dict[str, Any]]
-    alerts: List[Dict[str, Any]] = field(default_factory=list)
-    resources: List[Dict[str, Any]] = field(default_factory=list)
+    links: list[str]
+    tables: list[dict[str, Any]]
+    greenbook: dict[str, Any] | None
+    alerts: list[dict[str, Any]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_item(self) -> Dict[str, Any]:
+    def to_item(self) -> dict[str, Any]:
         return {
             "url": self.url,
             "title": self.title,
@@ -84,13 +105,13 @@ class PageDocument:
             "tables": self.tables,
             "greenbook": self.greenbook,
             "alerts": self.alerts,
-            "resources": self.resources
+            "resources": self.resources,
         }
 
 
-def extract_greenbook(text: str, tables: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def extract_greenbook(text: str, tables: list[dict[str, Any]]) -> dict[str, Any] | None:
     source_text = text or ""
-    table_lines: List[str] = []
+    table_lines: list[str] = []
 
     for table in tables:
         if len(table.get("rows", [])) > 3:
@@ -106,29 +127,34 @@ def extract_greenbook(text: str, tables: List[Dict[str, Any]]) -> Optional[Dict[
     if table_lines:
         source_text += "\n" + "\n".join(table_lines)
 
-    matched: Dict[str, Any] = {}
+    matched: dict[str, Any] = {}
     for fld, pattern in GREENBOOK_PATTERNS.items():
-        match = re.search(pattern, source_text, flags=re.I | re.M)
+        match = re.search(pattern, source_text, flags=re.IGNORECASE | re.MULTILINE)
         if match:
             matched[fld] = clean_text(match.group(1))[:400]
 
-    if len(matched) >= 2 and ("product_name" in matched or "registration_number" in matched):
+    if len(matched) >= 2 and (
+        "product_name" in matched or "registration_number" in matched
+    ):
         return matched
 
     lower = source_text.lower()
     if "green book" in lower or "greenbook" in lower:
-        return {"hint": "possible greenbook page", "excerpt": clean_text(source_text[:1200])}
+        return {
+            "hint": "possible greenbook page",
+            "excerpt": clean_text(source_text[:1200]),
+        }
 
     return None
 
 
-def extract_links(soup: BeautifulSoup, base_url: str) -> List[str]:
+def extract_links(soup: BeautifulSoup, base_url: str) -> list[str]:
     """Links from <a>, <area>, iframes/embeds/objects, data-* attributes,
     onclick handlers, and any element with a data-url-like attribute."""
-    found: List[str] = []
+    found: list[str] = []
 
     for el in soup.find_all(True):
-        candidates: List[Optional[str]] = []
+        candidates: list[str | None] = []
 
         if el.name in ("a", "area"):
             candidates.append(el.get("href"))
@@ -161,20 +187,22 @@ def extract_links(soup: BeautifulSoup, base_url: str) -> List[str]:
 DOC_EXT = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv")
 
 
-def extract_resources(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
+def extract_resources(soup: BeautifulSoup, base_url: str) -> list[dict[str, Any]]:
     """Documents (PDF/Word/Excel) and embedded content (iframes, embeds).
 
     Reads the URL from any of href / data-href / data-url / data-link /
     onclick / src / data, because NAFDAC's card widgets often place the PDF
     URL on a wrapping <div> or <button> rather than on a plain <a href>."""
-    found: List[Dict[str, Any]] = []
+    found: list[dict[str, Any]] = []
     seen = set()
 
-    for el in soup.find_all(["a", "iframe", "embed", "object", "button", "div", "span"]):
+    for el in soup.find_all(
+        ["a", "iframe", "embed", "object", "button", "div", "span"]
+    ):
         if el.find_parent(["nav", "footer", "aside"]):
             continue
 
-        raw_candidates: List[str] = []
+        raw_candidates: list[str] = []
         for attr in ("href", "data-href", "data-url", "data-link", "src", "data"):
             v = el.get(attr)
             if v:
@@ -198,22 +226,35 @@ def extract_resources(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]
             if path.endswith(DOC_EXT):
                 kind = path.rsplit(".", 1)[-1]
                 text = clean_text(el.get_text(" ", strip=True)).replace("\n", " ")
-                text = text or el.get("title") or el.get("aria-label") or path.rsplit("/", 1)[-1] or url
+                text = (
+                    text
+                    or el.get("title")
+                    or el.get("aria-label")
+                    or path.rsplit("/", 1)[-1]
+                    or url
+                )
                 seen.add(url)
                 found.append({"text": text[:200], "url": url, "type": kind})
                 continue
 
-            if el.name in ("iframe", "embed", "object") and (el.get("src") or el.get("data")):
-                text = el.get("title") or el.get("aria-label") or path.rsplit("/", 1)[-1] or url
+            if el.name in ("iframe", "embed", "object") and (
+                el.get("src") or el.get("data")
+            ):
+                text = (
+                    el.get("title")
+                    or el.get("aria-label")
+                    or path.rsplit("/", 1)[-1]
+                    or url
+                )
                 seen.add(url)
                 found.append({"text": text[:200], "url": url, "type": "embed"})
 
     return found
 
 
-def extract_alerts(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
+def extract_alerts(soup: BeautifulSoup, base_url: str) -> list[dict[str, Any]]:
     """Turn alert/recall/notice cards (date + title + link) into structured records."""
-    alerts: List[Dict[str, Any]] = []
+    alerts: list[dict[str, Any]] = []
     seen = set()
 
     for a in soup.find_all("a", href=True):
@@ -258,21 +299,29 @@ def extract_alerts(soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
 
         m = ALERT_NO_RE.search(title)
         card = a.find_parent("article")
-        excerpt = clean_text(card.get_text(" ", strip=True)).replace("\n", " ")[:300] if card else ""
-        alerts.append({
-            "date": date,
-            "alert_no": re.sub(r"\s+", "", m.group(1)) if m else None,
-            "title": title,
-            "url": url,
-            "excerpt": excerpt
-        })
+        excerpt = (
+            clean_text(card.get_text(" ", strip=True)).replace("\n", " ")[:300]
+            if card
+            else ""
+        )
+        alerts.append(
+            {
+                "date": date,
+                "alert_no": re.sub(r"\s+", "", m.group(1)) if m else None,
+                "title": title,
+                "url": url,
+                "excerpt": excerpt,
+            }
+        )
     return alerts
 
 
 def extract_page_document(url: str, html: str) -> PageDocument:
     soup = BeautifulSoup(html, "lxml")
 
-    canonical = soup.find("link", rel=lambda x: x and "canonical" in " ".join(x).lower())
+    canonical = soup.find(
+        "link", rel=lambda x: x and "canonical" in " ".join(x).lower()
+    )
     if canonical and canonical.get("href"):
         url = canonicalize_url(canonical["href"], url) or url
 
@@ -306,11 +355,11 @@ def extract_page_document(url: str, html: str) -> PageDocument:
         tables=tables,
         greenbook=greenbook,
         alerts=alerts,
-        resources=resources
+        resources=resources,
     )
 
 
-def merge_documents(base: PageDocument, others: List[PageDocument]) -> PageDocument:
+def merge_documents(base: PageDocument, others: list[PageDocument]) -> PageDocument:
     """Fold extra snapshots (after tab clicks, iframes, ...) into the base document."""
     seen_alerts = {(a["url"], a["title"]) for a in base.alerts}
     known_lines = set(base.text.splitlines())

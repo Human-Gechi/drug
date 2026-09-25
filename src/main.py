@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 from apify import Actor
 
@@ -13,7 +13,7 @@ from src.retrieval import is_list_query, priority_terms, rank_documents
 PUSH_BATCH_SIZE = 50
 
 
-async def _push_batched(records: List[Dict[str, Any]]) -> None:
+async def _push_batched(records: list[dict[str, Any]]) -> None:
     if not records:
         return
     for i in range(0, len(records), PUSH_BATCH_SIZE):
@@ -24,8 +24,8 @@ async def main() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError):
+            Actor.log.debug("Could not reconfigure stream encoding")
 
     async with Actor:
         raw_input = await Actor.get_input() or {}
@@ -39,7 +39,7 @@ async def main() -> None:
             page_timeout_ms=config.page_timeout_ms,
             debug_html=config.debug_html,
             priority_terms=priority_terms(config.query),
-            greenbook_terms=config.greenbook_terms
+            greenbook_terms=config.greenbook_terms,
         )
 
         Actor.log.info("crawled %d page(s)", len(documents))
@@ -54,7 +54,7 @@ async def main() -> None:
                 max_results=config.max_results,
                 default_max_results=config.default_max_results,
             )
-            output: Dict[str, Any] = {
+            output: dict[str, Any] = {
                 "type": "answer",
                 "query": config.query,
                 "answerType": result["answerType"],
@@ -62,7 +62,7 @@ async def main() -> None:
                 "recordCount": result.get("recordCount", 0),
                 "answerDetail": result["answerDetail"],
                 "sources": result["sources"],
-                "notes": result["notes"]
+                "notes": result["notes"],
             }
         else:
             output = {
@@ -73,7 +73,7 @@ async def main() -> None:
                 "recordCount": 0,
                 "answerDetail": None,
                 "sources": [],
-                "notes": []
+                "notes": [],
             }
 
         # Only one record per run goes into the default dataset.

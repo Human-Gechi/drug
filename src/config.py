@@ -1,12 +1,12 @@
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.router import BASE, plan_query
 from src.utils import normalize_domain
 
 
-def _parse_start_urls(value: Any) -> List[str]:
+def _parse_start_urls(value: Any) -> list[str]:
     """Accept a comma/space separated string OR Apify's [{"url": ...}] list."""
     if not value:
         return []
@@ -15,7 +15,7 @@ def _parse_start_urls(value: Any) -> List[str]:
     else:
         parts = [(u.get("url") if isinstance(u, dict) else u) for u in value]
 
-    urls: List[str] = []
+    urls: list[str] = []
     for p in parts:
         p = str(p or "").strip()
         if not p:
@@ -26,7 +26,7 @@ def _parse_start_urls(value: Any) -> List[str]:
     return list(dict.fromkeys(urls))
 
 
-def _as_positive_int(value: Any) -> Optional[int]:
+def _as_positive_int(value: Any) -> int | None:
     if value in (None, "", 0):
         return None
     try:
@@ -38,26 +38,26 @@ def _as_positive_int(value: Any) -> Optional[int]:
 
 @dataclass
 class AppConfig:
-    start_urls: List[str]
-    allowed_domains: List[str]
+    start_urls: list[str]
+    allowed_domains: list[str]
     max_pages: int = 200
     crawl_depth: int = 2
     page_timeout_ms: int = 20_000
     query: str = ""
     ai_model: str = "openai/gpt-oss-120b"
     debug_html: bool = False
-    greenbook_terms: List[str] = None
-    max_results: Optional[int] = None
-    default_max_results: Optional[int] = None
+    greenbook_terms: list[str] = None
+    max_results: int | None = None
+    default_max_results: int | None = None
 
     @classmethod
-    def from_input(cls, raw: Dict[str, Any]) -> "AppConfig":
+    def from_input(cls, raw: dict[str, Any]) -> "AppConfig":
         query = str(raw.get("query") or "").strip()
         auto_route = bool(raw.get("autoRoute", True))
 
         start_urls = _parse_start_urls(raw.get("startUrls"))
         routed = auto_route and bool(query)
-        greenbook_terms: List[str] = []
+        greenbook_terms: list[str] = []
         if routed:
             plan = plan_query(query)
             start_urls = list(dict.fromkeys(start_urls + plan.urls))
@@ -78,9 +78,9 @@ class AppConfig:
             crawl_depth=int(raw.get("crawlDepth") or default_depth),
             page_timeout_ms=int(raw.get("pageTimeoutMs") or 20_000),
             query=query,
-            ai_model="openai/gpt-oss-120b",  
+            ai_model="openai/gpt-oss-120b",
             debug_html=bool(raw.get("debugHtml", False)),
             greenbook_terms=greenbook_terms,
             max_results=_as_positive_int(raw.get("maxResults")),
-            default_max_results=_as_positive_int(raw.get("defaultMaxResults"))
+            default_max_results=_as_positive_int(raw.get("defaultMaxResults")),
         )

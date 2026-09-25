@@ -1,6 +1,6 @@
 import io
 import re
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 from urllib.parse import urlparse
 
 from apify import Actor
@@ -12,20 +12,30 @@ from crawlee.crawlers import (
     RenderingTypePrediction,
     RenderingTypePredictor,
 )
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.extractors import PageDocument, extract_greenbook, extract_page_document
 from src.greenbook import GREENBOOK_HOST, has_rows, map_to_active, search_greenbook
-from src.utils import clean_text, same_domain
+from src.utils import clean_text
 
 try:
     from pypdf import PdfReader
-except Exception:
+except ImportError:
     PdfReader = None  # type: ignore
 
 PRIORITY_KEYWORDS = (
-    "alert", "recall", "notice", "greenbook", "green-book", "fsn", "warning",
-    "withdraw", "suspend", "cancel", "blacklist", "watchlist", "list-of"
+    "alert",
+    "recall",
+    "notice",
+    "greenbook",
+    "green-book",
+    "fsn",
+    "warning",
+    "withdraw",
+    "suspend",
+    "cancel",
+    "blacklist",
+    "watchlist",
+    "list-of",
 )
 
 CRAWL_CONCURRENCY = 4
@@ -45,29 +55,25 @@ def is_pdf_url(url: str) -> bool:
     return urlparse(url).path.lower().endswith(".pdf")
 
 
-from crawlee.crawlers import RenderingType, RenderingTypePrediction, RenderingTypePredictor
-from crawlee import Request
-
 class NafdacRenderingTypePredictor(RenderingTypePredictor):
     """Force Playwright for the Greenbook domain, static for everything else."""
 
     def predict(self, request: Request) -> RenderingTypePrediction:
         if GREENBOOK_HOST in request.url:
             return RenderingTypePrediction(
-                rendering_type='client only',  # lowercase, with a space
+                rendering_type="client only",  # lowercase, with a space
                 detection_probability_recommendation=0.0,  # always trust this
             )
         # Return a static prediction for everything else, instead of None.
         return RenderingTypePrediction(
-            rendering_type='static',
-            detection_probability_recommendation=0.0
+            rendering_type="static", detection_probability_recommendation=0.0
         )
 
     def store_result(self, request: Request, rendering_type: RenderingType) -> None:
         """No-op: the policy is fixed, so there is nothing to learn."""
-        pass
 
-async def _fetch_pdf(context, url: str) -> Optional[PageDocument]:
+
+async def _fetch_pdf(context, url: str) -> PageDocument | None:
     """Download and extract text from a PDF using the crawler's HTTP client."""
     if PdfReader is None:
         Actor.log.warning("pypdf not installed; skipping PDF %s", url)
@@ -77,16 +83,23 @@ async def _fetch_pdf(context, url: str) -> Optional[PageDocument]:
         if not resp.ok:
             return None
         reader = PdfReader(io.BytesIO(resp.content))
-        text = clean_text("\n".join((p.extract_text() or "") for p in reader.pages[:60]))
+        text = clean_text(
+            "\n".join((p.extract_text() or "") for p in reader.pages[:60])
+        )
         if not text:
             return None
         first_line = next((ln for ln in text.splitlines() if ln.strip()), "")
         title = first_line[:150] or url.rsplit("/", 1)[-1]
         return PageDocument(
-            url=url, title=title, text=text, links=[], tables=[],
-            greenbook=extract_greenbook(text, []), alerts=[],
+            url=url,
+            title=title,
+            text=text,
+            links=[],
+            tables=[],
+            greenbook=extract_greenbook(text, []),
+            alerts=[],
         )
-    except Exception as exc:
+    except (ValueError, RuntimeError) as exc:
         Actor.log.warning("PDF failed %s: %r", url, exc)
         return None
 
@@ -100,21 +113,21 @@ async def crawl_site(
     debug_html: bool = False,
     priority_terms: Sequence[str] = (),
     greenbook_terms: Sequence[str] = (),
-) -> List[PageDocument]:
+) -> list[PageDocument]:
     """Crawl NAFDAC using Crawlee's AdaptivePlaywrightCrawler.
 
     Static pages (alerts, press releases, chemicals) go through HTTP for speed.
     The Greenbook, which renders its table via JavaScript, is forced through
     Playwright by the custom rendering type predictor.
     """
-    documents: List[PageDocument] = []
+    documents: list[PageDocument] = []
 
     crawler = AdaptivePlaywrightCrawler.with_beautifulsoup_static_parser(
         max_requests_per_crawl=max_pages,
         max_crawl_depth=crawl_depth,
         playwright_crawler_specific_kwargs={"headless": True},
         configure_logging=True,
-        rendering_type_predictor=NafdacRenderingTypePredictor()
+        rendering_type_predictor=NafdacRenderingTypePredictor(),
     )
 
     @crawler.router.default_handler
@@ -132,14 +145,18 @@ async def crawl_site(
         # For static pages, parsed_content is the BeautifulSoup object.
         # For Playwright pages, we need the raw HTML from the page.
         try:
-            html = str(context.parsed_content) if hasattr(context, "parsed_content") else ""
-        except Exception:
+            html = (
+                str(context.parsed_content)
+                if hasattr(context, "parsed_content")
+                else ""
+            )
+        except (AttributeError, TypeError):
             html = ""
 
         if not html:
             try:
                 html = await context.page.content()
-            except Exception:
+            except (RuntimeError, TimeoutError):
                 html = ""
 
         if not html:
@@ -163,7 +180,9 @@ async def crawl_site(
 
                 for term in candidates:
                     try:
-                        if not await search_greenbook(context.page, term, page_timeout_ms):
+                        if not await search_greenbook(
+                            context.page, term, page_timeout_ms
+                        ):
                             continue
                         result_html = await context.page.content()
                         if not has_rows(result_html):
@@ -173,15 +192,19 @@ async def crawl_site(
                         result_doc.title = f"Greenbook search: {term}"
                         documents.append(result_doc)
                         break
-                    except Exception as exc:
-                        Actor.log.warning("Greenbook search failed for %r: %r", term, exc)
+                    except (RuntimeError, ValueError) as exc:
+                        Actor.log.warning(
+                            "Greenbook search failed for %r: %r", term, exc
+                        )
 
         # --- Enqueue discovered links ---
         await context.enqueue_links(strategy="same-domain")
 
     Actor.log.info(
         "Crawl starting: %d URL(s), max %d pages, depth %d",
-        len(start_urls), max_pages, crawl_depth
+        len(start_urls),
+        max_pages,
+        crawl_depth,
     )
 
     await crawler.run(start_urls)

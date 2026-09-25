@@ -1,10 +1,10 @@
 "Everything specific to the NAFDAC Greenbook (greenbook.nafdac.gov.ng)"
 
 import re
-from typing import List, Optional
 
 from apify import Actor
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 GREENBOOK_HOST = "greenbook.nafdac.gov.ng"
 GREENBOOK_URL = "https://greenbook.nafdac.gov.ng/"
@@ -112,16 +112,16 @@ BRAND_TO_ACTIVE = {
 }
 
 
-def map_to_active(term: str) -> Optional[str]:
+def map_to_active(term: str) -> str | None:
     """Return the active-ingredient name for a known brand, else None."""
     return BRAND_TO_ACTIVE.get(term.lower().strip())
 
 
-def expand_terms(terms: List[str]) -> List[str]:
+def expand_terms(terms: list[str]) -> list[str]:
     """Given user-facing terms, return the terms to actually search on the Greenbook.
     A mapped brand is replaced by its active ingredient; an already-generic term
     is kept as-is. Order is preserved and duplicates are removed."""
-    out: List[str] = []
+    out: list[str] = []
     seen = set()
     for t in terms:
         mapped = map_to_active(t) or t
@@ -157,7 +157,7 @@ async def search_greenbook(page: Page, term: str, timeout_ms: int) -> bool:
                     (await inp.get_attribute(a)) or ""
                     for a in ("placeholder", "name", "id", "aria-label")
                 ).lower()
-            except Exception:
+            except (AttributeError, TypeError):
                 meta = ""
             if "product" in meta:
                 target = inp
@@ -165,10 +165,13 @@ async def search_greenbook(page: Page, term: str, timeout_ms: int) -> bool:
         if target is None:
             for inp in inputs:
                 try:
-                    if await inp.is_visible():
+                    if inp.is_visible():
                         target = inp
                         break
-                except Exception:
+                except (RuntimeError, ValueError) as exc:
+                    Actor.log.debug(
+                        "Greenbook: error checking input visibility: %r", exc
+                    )
                     continue
         if not target:
             Actor.log.warning("Greenbook: no visible search input found.")
@@ -181,18 +184,20 @@ async def search_greenbook(page: Page, term: str, timeout_ms: int) -> bool:
 
         for selector in _TABLE_READY_SELECTORS:
             try:
-                await page.wait_for_selector(selector, timeout=timeout_ms, state="attached")
+                await page.wait_for_selector(
+                    selector, timeout=timeout_ms, state="attached"
+                )
                 break
             except PlaywrightTimeoutError:
                 continue
 
         await page.wait_for_timeout(500)
         return True
-    except Exception as exc:
+    except (RuntimeError, TimeoutError) as exc:
         Actor.log.warning("Greenbook search failed for %r: %r", term, exc)
         return False
 
 
 def has_rows(html: str) -> bool:
     """Cheap check: does the HTML contain any <tr> with at least one <td>?"""
-    return bool(re.search(r"<tr[^>]*>\s*<td", html, re.I))
+    return bool(re.search(r"<tr[^>]*>\s*<td", html, re.IGNORECASE))

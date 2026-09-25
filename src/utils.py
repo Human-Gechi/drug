@@ -1,5 +1,6 @@
 import re
-from typing import Any, Dict, Iterable, List
+from collections.abc import Iterable
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
@@ -14,7 +15,7 @@ TRACKING_KEYS = {
     "fbclid",
 }
 
-TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
+TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 
 
 def normalize_domain(value: str) -> str:
@@ -67,7 +68,7 @@ def clean_text(text: str) -> str:
         .replace("\u200b", "")
         .replace("\ufeff", "")
     )
-    lines: List[str] = []
+    lines: list[str] = []
     for line in text.splitlines():
         line = re.sub(r"\s+", " ", line).strip()
         if line:
@@ -75,14 +76,14 @@ def clean_text(text: str) -> str:
     return "\n".join(lines)
 
 
-def tokenize(value: str) -> List[str]:
+def tokenize(value: str) -> list[str]:
     """Lowercase alphanumeric tokenizer. 'Is Panadol approved?' -> ['is', 'panadol', 'approved']."""
     return TOKEN_RE.findall((value or "").lower())
 
 
-def _cell_links(cells: Iterable[Any], base_url: str) -> List[Dict[str, str]]:
+def _cell_links(cells: Iterable[Any], base_url: str) -> list[dict[str, str]]:
     """Links found inside a table row's cells, with their visible text."""
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for cell in cells:
         for a in cell.find_all("a", href=True):
             href = a["href"].strip()
@@ -90,25 +91,31 @@ def _cell_links(cells: Iterable[Any], base_url: str) -> List[Dict[str, str]]:
                 continue
             url = canonicalize_url(href, base_url)
             if url:
-                out.append({
-                    "text": clean_text(a.get_text(" ", strip=True)).replace("\n", " "),
-                    "url": url,
-                })
+                out.append(
+                    {
+                        "text": clean_text(a.get_text(" ", strip=True)).replace(
+                            "\n", " "
+                        ),
+                        "url": url,
+                    }
+                )
     return out
 
 
-def extract_tables(soup: BeautifulSoup, base_url: str = "") -> List[Dict[str, Any]]:
+def extract_tables(soup: BeautifulSoup, base_url: str = "") -> list[dict[str, Any]]:
     """Extract every table on the page as {headers, rows, row_links}.
 
     If a row's cell count matches the header count, the row is a dict keyed by
     header names. Otherwise the row is {"cells": [...]} in source order.
     row_links is a parallel list: for each row, the links found in its cells.
     """
-    tables: List[Dict[str, Any]] = []
+    tables: list[dict[str, Any]] = []
     for table in soup.find_all("table")[:30]:
-        headers = [clean_text(th.get_text(" ", strip=True)) for th in table.find_all("th")]
-        rows: List[Dict[str, Any]] = []
-        row_links: List[List[Dict[str, str]]] = []
+        headers = [
+            clean_text(th.get_text(" ", strip=True)) for th in table.find_all("th")
+        ]
+        rows: list[dict[str, Any]] = []
+        row_links: list[list[dict[str, str]]] = []
 
         for tr in table.find_all("tr")[:2000]:
             tr_cells = tr.find_all(["td", "th"])

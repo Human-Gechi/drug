@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from apify import Actor
 
@@ -17,12 +17,12 @@ from src.retrieval import (
     extract_count,
     is_alert_query,
     is_list_query,
-    resolve_limit
+    resolve_limit,
 )
 
 try:
     from groq import AsyncGroq
-except Exception:
+except ImportError:
     AsyncGroq = None  # type: ignore
 
 FALLBACK_MODELS = ["openai/gpt-oss-20b", "llama-3.1-8b-instant"]
@@ -36,27 +36,40 @@ SYSTEM_PROMPT = (
     "Cite the source page URLs as plain text. Do not use special citation markers. Be concise."
 )
 
-SN_RE = re.compile(r"^\W*(s/?n|sn|no\.?|#|serial.*)\W*$", re.I)
+SN_RE = re.compile(r"^\W*(s/?n|sn|no\.?|#|serial.*)\W*$", re.IGNORECASE)
 
 _PLACEHOLDER_MARKERS = (
     "no matching records found",
     "no records found",
     "no data available in table",
     "no results found",
-    "no matching records"
+    "no matching records",
 )
 
 _SINGULAR_SUPERLATIVE_RE = re.compile(
     r"\b(?:the\s+)?(?:last|latest|newest|most\s+recent|first|only)\b"
     r"|\bwhich\s+(?:one|single)\b",
-    re.I
+    re.IGNORECASE,
 )
 
 _DOCUMENT_QUERY_WORDS = {
-    "document", "documents", "file", "files", "pdf", "pdfs",
-    "download", "attachment", "attachments",
-    "chemical", "chemicals", "pesticide", "pesticides",
-    "disinfectant", "disinfectants", "narcotic", "narcotics"
+    "document",
+    "documents",
+    "file",
+    "files",
+    "pdf",
+    "pdfs",
+    "download",
+    "attachment",
+    "attachments",
+    "chemical",
+    "chemicals",
+    "pesticide",
+    "pesticides",
+    "disinfectant",
+    "disinfectants",
+    "narcotic",
+    "narcotics",
 }
 
 
@@ -70,8 +83,9 @@ def _wants_document(query: str) -> bool:
 
 # LLM context
 
-def build_context_block(query: str, ranked_docs: List[Dict[str, Any]]) -> str:
-    blocks: List[str] = []
+
+def build_context_block(query: str, ranked_docs: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
     for idx, item in enumerate(ranked_docs[:20], start=1):
         doc = item["document"]
         lines = [f"[{idx}] Source page: {doc.url}", f"Page title: {doc.title}"]
@@ -87,31 +101,43 @@ def build_context_block(query: str, ranked_docs: List[Dict[str, Any]]) -> str:
 
 # Deterministic answer branches (no LLM)
 
+
 def structured_greenbook_answer(
     query: str,
-    ranked_docs: List[Dict[str, Any]],
-    max_results: Optional[int] = None,
-    default_max_results: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    ranked_docs: list[dict[str, Any]],
+    max_results: int | None = None,
+    default_max_results: int | None = None,
+) -> dict[str, Any] | None:
     q_tokens = set(content_tokens(query)) - {
-        "registered", "registration", "greenbook", "green", "book", "nafdac",
-        "approved", "licensed", "drug", "number", "reg"
+        "registered",
+        "registration",
+        "greenbook",
+        "green",
+        "book",
+        "nafdac",
+        "approved",
+        "licensed",
+        "drug",
+        "number",
+        "reg",
     }
     if not q_tokens:
         return None
 
-    notes: List[str] = []
+    notes: list[str] = []
     expanded = set()
     for t in q_tokens:
         expanded.add(t)
         mapped = map_to_active(t)
         if mapped and mapped.lower() != t.lower():
             expanded.update(content_tokens(mapped))
-            notes.append(f"Searched for '{mapped}' because '{t}' is a brand name of {mapped}.")
+            notes.append(
+                f"Searched for '{mapped}' because '{t}' is a brand name of {mapped}."
+            )
     q_tokens = expanded
 
-    records: List[Dict[str, Any]] = []
-    source_urls: List[str] = []
+    records: list[dict[str, Any]] = []
+    source_urls: list[str] = []
     seen = set()
     for item in ranked_docs:
         doc = item["document"]
@@ -146,7 +172,7 @@ def structured_greenbook_answer(
         records = records[:limit]
 
     first = records[0]
-    parts: List[str] = []
+    parts: list[str] = []
     if (first.get("status") or "").lower() == "active":
         parts.append("Yes.")
     name = first.get("product_name") or "The product"
@@ -177,11 +203,11 @@ def structured_greenbook_answer(
         "answer": " ".join(parts),
         "detail": {"records": records},
         "sources": sources,
-        "notes": notes
+        "notes": notes,
     }
 
 
-def _format_row(row: Dict[str, Any]) -> str:
+def _format_row(row: dict[str, Any]) -> str:
     if "cells" in row:
         vals = row["cells"]
     else:
@@ -190,34 +216,37 @@ def _format_row(row: Dict[str, Any]) -> str:
     return " | ".join(vals)
 
 
-def _row_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+def _row_fields(row: dict[str, Any]) -> dict[str, Any]:
     if "cells" in row:
         return {f"col_{i + 1}": v for i, v in enumerate(row["cells"])}
     return {k: v for k, v in row.items() if not SN_RE.match(str(k))}
 
 
-def _row_cell_count(row: Dict[str, Any]) -> int:
+def _row_cell_count(row: dict[str, Any]) -> int:
     if "cells" in row:
         cells = row["cells"]
     else:
         cells = [v for k, v in row.items() if not SN_RE.match(str(k))]
     return sum(
-        1 for c in cells
-        if isinstance(c, str) and len(c.strip()) >= 2 and c.strip() not in {"×", "x", "-"}
+        1
+        for c in cells
+        if isinstance(c, str)
+        and len(c.strip()) >= 2
+        and c.strip() not in {"×", "x", "-"}
     )
 
 
-def _is_placeholder_row(row: Dict[str, Any]) -> bool:
+def _is_placeholder_row(row: dict[str, Any]) -> bool:
     text = _format_row(row).lower()
     return any(marker in text for marker in _PLACEHOLDER_MARKERS)
 
 
 def structured_table_answer(
     query: str,
-    ranked_docs: List[Dict[str, Any]],
-    max_results: Optional[int] = None,
-    default_max_results: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    ranked_docs: list[dict[str, Any]],
+    max_results: int | None = None,
+    default_max_results: int | None = None,
+) -> dict[str, Any] | None:
     rows = [i for i in ranked_docs if i.get("kind") == "table" and i.get("row")]
     if len(rows) < 3:
         return None
@@ -248,17 +277,20 @@ def structured_table_answer(
 
     q_specific = [t for t in content_tokens(query) if t not in GENERIC_TERMS]
     if q_specific:
-        def row_matches(r: Dict[str, Any]) -> bool:
-            cell_words = set(content_tokens(
-                _format_row(r["row"]) + " " + " ".join(map(str, r["row"].values()))
-            ))
+
+        def row_matches(r: dict[str, Any]) -> bool:
+            cell_words = set(
+                content_tokens(
+                    _format_row(r["row"]) + " " + " ".join(map(str, r["row"].values()))
+                )
+            )
             return any(w in cell_words for w in q_specific)
 
         rows = [r for r in rows if row_matches(r)]
         if not rows:
             return None
 
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for r in rows:
         if _is_placeholder_row(r["row"]):
             continue
@@ -284,10 +316,13 @@ def structured_table_answer(
         records = records[:limit]
 
     n = len(records)
-    lines = [f"{n} entr{'y' if n == 1 else 'ies'} in \"{doc.title}\" ({total} rows total):", ""]
+    lines = [
+        f'{n} entr{"y" if n == 1 else "ies"} in "{doc.title}" ({total} rows total):',
+        "",
+    ]
     for i, r in enumerate(records, start=1):
-        text_parts: List[str] = []
-        urls: List[str] = []
+        text_parts: list[str] = []
+        urls: list[str] = []
         for k, v in r.items():
             if k in ("url", "urls"):
                 if isinstance(v, str):
@@ -316,18 +351,18 @@ def structured_table_answer(
             "records": records,
         },
         "sources": [{"title": doc.title or doc.url, "url": doc.url}],
-        "notes": []
+        "notes": [],
     }
 
 
 def structured_alerts_answer(
     query: str,
-    ranked_docs: List[Dict[str, Any]],
-    max_results: Optional[int] = None,
-    default_max_results: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    ranked_docs: list[dict[str, Any]],
+    max_results: int | None = None,
+    default_max_results: int | None = None,
+) -> dict[str, Any] | None:
     seen = set()
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for item in ranked_docs:
         alert = item.get("alert")
         if item.get("kind") != "alert" or not alert:
@@ -336,21 +371,23 @@ def structured_alerts_answer(
         if key in seen:
             continue
         seen.add(key)
-        records.append({
-            "date": alert.get("date"),
-            "alert_no": alert.get("alert_no"),
-            "title": alert.get("title"),
-            "url": alert.get("url")
-        })
+        records.append(
+            {
+                "date": alert.get("date"),
+                "alert_no": alert.get("alert_no"),
+                "title": alert.get("title"),
+                "url": alert.get("url"),
+            }
+        )
     if not records:
         return None
 
-    def _sort_key(a: Dict[str, Any]) -> tuple:
+    def _sort_key(a: dict[str, Any]) -> tuple:
         no = a.get("alert_no") or ""
         try:
             parts = no.split("/")
             return (int(parts[1]), int(parts[0]))
-        except Exception:
+        except (ValueError, IndexError):
             return (0, 0)
 
     records = sorted(records, key=_sort_key, reverse=True)
@@ -378,12 +415,7 @@ def structured_alerts_answer(
             text = f"Public Alert No. {first['alert_no']} – {text}"
         if first.get("date"):
             text = f"{text} ({first['date']})"
-        return {
-            "answer": text,
-            "detail": {"alert": first},
-            "sources": [],
-            "notes": []
-        }
+        return {"answer": text, "detail": {"alert": first}, "sources": [], "notes": []}
 
     lines = [f"Found {len(records)} matching alert(s):", ""]
     for i, r in enumerate(records, start=1):
@@ -400,20 +432,20 @@ def structured_alerts_answer(
         "answer": "\n".join(lines).rstrip(),
         "detail": {"records": records},
         "sources": [],
-        "notes": []
+        "notes": [],
     }
 
 
 def document_answer(
     query: str,
-    ranked_docs: List[Dict[str, Any]],
-    max_results: Optional[int] = None,
-    default_max_results: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    ranked_docs: list[dict[str, Any]],
+    max_results: int | None = None,
+    default_max_results: int | None = None,
+) -> dict[str, Any] | None:
     if not _wants_document(query):
         return None
 
-    docs: List[Dict[str, Any]] = []
+    docs: list[dict[str, Any]] = []
     seen = set()
     for item in ranked_docs:
         for r in item["document"].resources:
@@ -423,20 +455,24 @@ def document_answer(
             if r["url"] in seen:
                 continue
             seen.add(r["url"])
-            docs.append({
-                "title": r.get("text") or r["url"].rsplit("/", 1)[-1],
-                "url": r["url"],
-                "type": t
-            })
+            docs.append(
+                {
+                    "title": r.get("text") or r["url"].rsplit("/", 1)[-1],
+                    "url": r["url"],
+                    "type": t,
+                }
+            )
 
     if not docs:
         return None
 
     q_words = [w for w in content_tokens(query) if w not in GENERIC_TERMS]
     if q_words:
-        def score(d: Dict[str, Any]) -> int:
+
+        def score(d: dict[str, Any]) -> int:
             hay = (d["title"] + " " + d["url"]).lower()
             return sum(1 for w in q_words if w in hay)
+
         docs.sort(key=score, reverse=True)
 
     limit = resolve_limit(
@@ -457,18 +493,20 @@ def document_answer(
         "answer": "\n".join(lines).rstrip(),
         "detail": {"documents": docs},
         "sources": [{"title": d["title"], "url": d["url"]} for d in docs],
-        "notes": []
+        "notes": [],
     }
+
 
 # Fallback used only when the LLM is unavailable
 
-def _fallback_text(query: str, ranked_docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+def _fallback_text(query: str, ranked_docs: list[dict[str, Any]]) -> dict[str, Any]:
     if not ranked_docs:
         return {
             "answer": "No relevant NAFDAC pages were found.",
             "detail": None,
             "sources": [],
-            "notes": []
+            "notes": [],
         }
     best = ranked_docs[0]
     doc = best["document"]
@@ -477,22 +515,23 @@ def _fallback_text(query: str, ranked_docs: List[Dict[str, Any]]) -> Dict[str, A
         "answer": f"{doc.title or doc.url}: {snippet}",
         "detail": None,
         "sources": useful_sources(ranked_docs),
-        "notes": ["Groq was unavailable; showing top retrieved excerpt."]
+        "notes": ["Groq was unavailable; showing top retrieved excerpt."],
     }
 
 
 # LLM path (this is where Groq is called)
+
 
 def _clean_llm_text(text: str) -> str:
     return re.sub(r"【[^】]*】", "", text).strip()
 
 
 async def _llm_text_answer(
-    query: str, ranked_docs: List[Dict[str, Any]], model: str
-) -> Optional[str]:
+    query: str, ranked_docs: list[dict[str, Any]], model: str
+) -> str | None:
     """Call Groq with the retrieved context. Returns None on any failure so
     the caller can fall back to a plain excerpt."""
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    api_key = (os.getenv("GROQ_API_KEY") or "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").strip()
     if not api_key:
         Actor.log.warning("GROQ_API_KEY is not set; using fallback answer.")
         return None
@@ -507,7 +546,7 @@ async def _llm_text_answer(
 
     for candidate in dict.fromkeys([model] + FALLBACK_MODELS):
         try:
-            kwargs: Dict[str, Any] = {}
+            kwargs: dict[str, Any] = {}
             if "gpt-oss" in candidate:
                 kwargs["extra_body"] = {"reasoning_effort": "low"}
 
@@ -519,7 +558,10 @@ async def _llm_text_answer(
                     max_tokens=2000,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Question: {query}\n\nContext:\n{context}"},
+                        {
+                            "role": "user",
+                            "content": f"Question: {query}\n\nContext:\n{context}",
+                        },
                     ],
                     **kwargs,
                 ),
@@ -527,15 +569,22 @@ async def _llm_text_answer(
             )
             text = _clean_llm_text(response.choices[0].message.content or "")
             if text:
-                Actor.log.info("Groq returned %d characters using %s", len(text), candidate)
+                Actor.log.info(
+                    "Groq returned %d characters using %s", len(text), candidate
+                )
                 return text
             Actor.log.warning("Model %s returned empty content.", candidate)
         except asyncio.TimeoutError:
-            Actor.log.error("Groq call timed out after %.0fs with model %s", GROQ_TIMEOUT_S, candidate)
-        except Exception as exc:
+            Actor.log.error(
+                "Groq call timed out after %.0fs with model %s",
+                GROQ_TIMEOUT_S,
+                candidate,
+            )
+        except (RuntimeError, KeyError, ValueError) as exc:
             Actor.log.error("Groq call failed with model %s: %r", candidate, exc)
 
     return None
+
 
 # Source filtering
 
@@ -549,10 +598,10 @@ _EMPTY_MARKERS = (
 
 
 def useful_sources(
-    ranked_docs: List[Dict[str, Any]],
+    ranked_docs: list[dict[str, Any]],
     max_sources: int = 5,
-) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     seen = set()
 
     for item in ranked_docs:
@@ -594,26 +643,28 @@ def useful_sources(
 
 # Entry point
 
+
 async def answer_question(
     query: str,
-    ranked_docs: List[Dict[str, Any]],
+    ranked_docs: list[dict[str, Any]],
     model: str,
-    max_results: Optional[int] = None,
-    default_max_results: Optional[int] = None,
-) -> Dict[str, Any]:
+    max_results: int | None = None,
+    default_max_results: int | None = None,
+) -> dict[str, Any]:
     """Returns:
-        {
-            "answerType": "registration" | "table" | "alerts" | "document" | "text",
-            "answer": str,
-            "answerDetail": dict | None,
-            "recordCount": int,
-            "sources": [ {title, url} ... ],
-            "notes": [str],
-        }
+    {
+        "answerType": "registration" | "table" | "alerts" | "document" | "text",
+        "answer": str,
+        "answerDetail": dict | None,
+        "recordCount": int,
+        "sources": [ {title, url} ... ],
+        "notes": [str],
+    }
     """
     # 1. Registration
     reg = structured_greenbook_answer(
-        query, ranked_docs,
+        query,
+        ranked_docs,
         max_results=max_results,
         default_max_results=default_max_results,
     )
@@ -626,12 +677,13 @@ async def answer_question(
             "answerDetail": reg["detail"],
             "recordCount": count,
             "sources": reg["sources"],
-            "notes": reg["notes"]
+            "notes": reg["notes"],
         }
 
     # 2. Table
     tbl = structured_table_answer(
-        query, ranked_docs,
+        query,
+        ranked_docs,
         max_results=max_results,
         default_max_results=default_max_results,
     )
@@ -644,13 +696,14 @@ async def answer_question(
             "answerDetail": tbl["detail"],
             "recordCount": count,
             "sources": tbl["sources"],
-            "notes": tbl["notes"]
+            "notes": tbl["notes"],
         }
 
     # 3. Alerts
     if is_alert_query(query):
         al = structured_alerts_answer(
-            query, ranked_docs,
+            query,
+            ranked_docs,
             max_results=max_results,
             default_max_results=default_max_results,
         )
@@ -663,12 +716,13 @@ async def answer_question(
                 "answerDetail": al["detail"],
                 "recordCount": count,
                 "sources": al["sources"],
-                "notes": al["notes"]
+                "notes": al["notes"],
             }
 
     # 4. Document
     doc = document_answer(
-        query, ranked_docs,
+        query,
+        ranked_docs,
         max_results=max_results,
         default_max_results=default_max_results,
     )
@@ -681,7 +735,7 @@ async def answer_question(
             "answerDetail": doc["detail"],
             "recordCount": count,
             "sources": doc["sources"],
-            "notes": doc["notes"]
+            "notes": doc["notes"],
         }
 
     # 5. Free-form text via LLM (fallback if no key)
@@ -694,7 +748,7 @@ async def answer_question(
             "answerDetail": None,
             "recordCount": 0,
             "sources": useful_sources(ranked_docs),
-            "notes": []
+            "notes": [],
         }
 
     fb = _fallback_text(query, ranked_docs)
@@ -704,5 +758,5 @@ async def answer_question(
         "answerDetail": fb["detail"],
         "recordCount": 0,
         "sources": fb["sources"],
-        "notes": fb["notes"]
+        "notes": fb["notes"],
     }
