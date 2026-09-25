@@ -1,0 +1,77 @@
+{
+  "title": "NAFDAC Regulatory Assistant",
+  "description": "Ask a question about anything NAFDAC has published. The Actor picks the relevant sections of nafdac.gov.ng, reads them live in a real browser (tabs, tables, embedded frames and PDFs included) and answers with links to the official pages and documents.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "query": {
+      "title": "Question",
+      "type": "string",
+      "description": "Your question in plain language. Examples: \"What are the latest drug recalls?\", \"Is company X on the blacklist?\", \"List products withdrawn in 2025\", \"Is there a field safety notice for syringes?\", \"What are the NAFDAC fees for product registration?\", \"What do the labelling guidelines require?\"",
+      "editor": "textarea",
+      "prefill": "What are the latest drug recalls?"
+    },
+    "autoRoute": {
+      "title": "Choose sections automatically",
+      "type": "boolean",
+      "description": "Read the question and start the crawl in the matching NAFDAC sections (alerts, withdrawals, blacklists, guidelines, fees, news and so on). Recommended. Turn off to crawl only the URLs you provide.",
+      "default": true
+    },
+    "startUrls": {
+      "title": "Extra start URLs (optional)",
+      "type": "array",
+      "description": "Additional NAFDAC pages to crawl. These are visited in addition to the automatically chosen sections. Leave empty to use automatic routing only.",
+      "editor": "requestListSources"
+    },
+    "aiModel": {
+      "title": "Groq model",
+      "type": "string",
+      "description": "Language model used to write answers from the retrieved text. If the chosen model is unavailable to your key, the Actor tries the others in order. Requires the GROQ_API_KEY environment variable.",
+      "editor": "select",
+      "default": "openai/gpt-oss-120b",
+      "enum": [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant"
+      ],
+      "enumTitles": [
+        "GPT-OSS 120B",
+        "GPT-OSS 20B (Dedfault)",
+        "Llama 3.1 8B Instant (fastest)"
+      ]
+    },
+    "maxPages": {
+      "title": "Max pages to crawl",
+      "type": "integer",
+      "description": "Upper limit on pages and PDFs visited per run. Routed sections are crawled first, so a small number usually finds what you need.",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 500,
+      "sectionCaption": "Crawl settings",
+      "sectionDescription": "Defaults work for most questions. Raise them for broad questions or long lists."
+    },
+    "crawlDepth": {
+      "title": "Crawl depth",
+      "type": "integer",
+      "description": "How many link levels to follow from each starting page. 1 reaches individual alert pages and documents linked from the section pages.",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 4
+    },
+    "pageTimeoutMs": {
+      "title": "Page timeout (ms)",
+      "type": "integer",
+      "description": "Maximum time to wait for a single page to load.",
+      "default": 45000,
+      "minimum": 5000,
+      "maximum": 120000
+    },
+    "debugHtml": {
+      "title": "Save debug HTML snapshots",
+      "type": "boolean",
+      "description": "Store the raw HTML of each crawled page in the key-value store. Useful for checking why an answer is missing something.",
+      "default": false
+    }
+  },
+  "required": ["query"]
+}
