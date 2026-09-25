@@ -1,0 +1,37 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "NAFDAC Regulatory Assistant output",
+  "description": "Where to find the answer, the crawled pages, and the run statistics.",
+  "properties": {
+    "answer": {
+      "type": "string",
+      "title": "Answer",
+      "description": "The single answer record for this run. answerType is one of registration, table, alerts, document, text. answerDetail holds the records; recordCount tells you how many.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items?view=answers"
+    },
+    "pages": {
+      "type": "string",
+      "title": "Crawled pages",
+      "description": "Every page and PDF read during the run. Open Storage → Datasets → pages on this run's page.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "runSummary": {
+      "type": "string",
+      "title": "Run summary",
+      "description": "Pages crawled, alerts found, table rows extracted, URLs visited. Open Storage → Datasets → runs on this run's page.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "allRecords": {
+      "type": "string",
+      "title": "All records",
+      "description": "Everything the run stored in the default dataset, unfiltered.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "debug": {
+      "type": "string",
+      "title": "Run key-value store",
+      "description": "All keys written by this run. Includes OUTPUT (the answer). Debug HTML snapshots appear only when debugHtml is enabled.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/keys"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "actorKeyValueStoreSchemaVersion": 1,
+  "title": "NAFDAC Assistant Key-Value Store",
+  "collections": {
+    "output": {
+      "title": "Answer Output",
+      "description": "The final answer record for the run",
+      "key": "OUTPUT"
+    },
+    "debug": {
+      "title": "Debug Snapshots",
+      "description": "Raw HTML snapshots saved when debugHtml is enabled",
+      "keyPrefix": "debug_"
+    }
+  }
+}

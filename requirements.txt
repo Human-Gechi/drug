@@ -1,0 +1,4 @@
+apify
+pypdf
+groq
+crawlee[adaptive-crawler]

@@ -1,0 +1,37 @@
+{
+  "actorSpecification": 1,
+  "title": "NAFDAC Regulatory Assistant results",
+  "description": "One answer per run.",
+  "fields": {},
+  "views": {
+    "answers": {
+      "title": "Answers",
+      "description": "One row per run. The Answer column contains the full list with URLs; the Detail column holds the structured records.",
+      "transformation": {
+        "fields": [
+          "type",
+          "query",
+          "answerType",
+          "answer",
+          "recordCount",
+          "answerDetail",
+          "sources",
+          "notes"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "type": { "label": "Record", "format": "text" },
+          "query": { "label": "Question", "format": "text" },
+          "answerType": { "label": "Answer type", "format": "text" },
+          "answer": { "label": "Answer", "format": "text" },
+          "recordCount": { "label": "Records", "format": "number" },
+          "answerDetail": { "label": "Detail", "format": "array" },
+          "sources": { "label": "Sources", "format": "array" },
+          "notes": { "label": "Notes", "format": "array" }
+        }
+      }
+    }
+  }
+}

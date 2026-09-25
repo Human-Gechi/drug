@@ -1,16 +1,17 @@
 {
   "actorSpecification": 1,
-  "name": "nafdac-regulatory-assistant",
+  "name": "rRx",
   "title": "NAFDAC Regulatory Assistant",
   "description": "One place to look up anything published by NAFDAC (Nigeria): recalls, public alerts, field safety notices, blacklists, watchlists, guidelines, fees and more. Ask a question, get an answer with links to the official sources.",
-  "version": "0.1",
+  "version": "0.2",
   "buildTag": "latest",
-  "minMemoryMbytes": 1024,
-  "defaultMemoryMbytes": 2048,
-  "maxMemoryMbytes": 4096,
-  "input": "./input_schema.json",
-  "output": "./output_schema.json",
   "storages": {
-    "dataset": "./dataset_schema.json"
-  }
+    "dataset": "./dataset_schema.json",
+    "keyValueStore": "./key_value_store_schema.json"
+  },
+  "minMemoryMbytes": 2048,
+  "defaultMemoryMbytes": 4096,
+  "maxMemoryMbytes": 8192,
+  "input": "./input_schema.json",
+  "output": "./output_schema.json"
 }

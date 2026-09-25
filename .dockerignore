@@ -1,0 +1,10 @@
+.git
+.gitignore
+storage
+.venv
+venv
+__pycache__
+*.pyc
+.env
+apify_storage
+node_modules

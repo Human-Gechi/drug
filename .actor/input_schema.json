@@ -1,15 +1,29 @@
 {
   "title": "NAFDAC Regulatory Assistant",
-  "description": "Ask a question about anything NAFDAC has published. The Actor picks the relevant sections of nafdac.gov.ng, reads them live in a real browser (tabs, tables, embedded frames and PDFs included) and answers with links to the official pages and documents.",
+  "description": "Ask a question about anything NAFDAC has published. The Actor picks the relevant sections of nafdac.gov.ng, reads them live in a real browser, and answers with links to the official pages and documents.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "query": {
       "title": "Question",
       "type": "string",
-      "description": "Your question in plain language. Examples: \"What are the latest drug recalls?\", \"Is company X on the blacklist?\", \"List products withdrawn in 2025\", \"Is there a field safety notice for syringes?\", \"What are the NAFDAC fees for product registration?\", \"What do the labelling guidelines require?\"",
+      "description": "Your question in plain language. Examples: \"What are the latest drug recalls?\", \"List products withdrawn by Nafdac\", \"What are the NAFDAC fees for product registration?\"",
       "editor": "textarea",
       "prefill": "What are the latest drug recalls?"
+    },
+    "maxResults": {
+      "title": "Maximum results",
+      "type": "integer",
+      "description": "Upper bound on the number of records returned for list-style answers (alerts, recalls, table rows). Leave blank to let the actor use the number in the question ('top 5', 'last 10'), or a sensible default. Set explicitly to pin the count regardless of how the question is phrased.",
+      "minimum": 1,
+      "maximum": 200
+    },
+    "defaultMaxResults": {
+      "title": "Default results per answer",
+      "type": "integer",
+      "description": "Fallback count for list-style answers when the question itself contains no number. Used only if Maximum results is blank. Example: set to 20 so 'latest recalls' returns 20 unless the user says 'top 5'. Leave blank for the built-in defaults (10 for alerts, 100 for tables, 25 for documents and registrations).",
+      "minimum": 1,
+      "maximum": 200
     },
     "autoRoute": {
       "title": "Choose sections automatically",
@@ -23,46 +37,27 @@
       "description": "Additional NAFDAC pages to crawl. These are visited in addition to the automatically chosen sections. Leave empty to use automatic routing only.",
       "editor": "requestListSources"
     },
-    "aiModel": {
-      "title": "Groq model",
-      "type": "string",
-      "description": "Language model used to write answers from the retrieved text. If the chosen model is unavailable to your key, the Actor tries the others in order. Requires the GROQ_API_KEY environment variable.",
-      "editor": "select",
-      "default": "openai/gpt-oss-120b",
-      "enum": [
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
-        "llama-3.1-8b-instant"
-      ],
-      "enumTitles": [
-        "GPT-OSS 120B",
-        "GPT-OSS 20B (Dedfault)",
-        "Llama 3.1 8B Instant (fastest)"
-      ]
-    },
     "maxPages": {
       "title": "Max pages to crawl",
       "type": "integer",
-      "description": "Upper limit on pages and PDFs visited per run. Routed sections are crawled first, so a small number usually finds what you need.",
-      "default": 30,
+      "description": "Upper limit on pages and PDFs visited per run. Leave blank to let the Actor pick automatically.",
       "minimum": 1,
       "maximum": 500,
       "sectionCaption": "Crawl settings",
-      "sectionDescription": "Defaults work for most questions. Raise them for broad questions or long lists."
+      "sectionDescription": "Defaults work for most questions. Raise them for broad questions or long lists; lower them for a fast demo."
     },
     "crawlDepth": {
       "title": "Crawl depth",
       "type": "integer",
-      "description": "How many link levels to follow from each starting page. 1 reaches individual alert pages and documents linked from the section pages.",
-      "default": 1,
-      "minimum": 1,
+      "description": "How many link levels to follow from each starting page. 0 means only visit the starting pages themselves. Leave blank to let the Actor pick automatically.",
+      "minimum": 0,
       "maximum": 4
     },
     "pageTimeoutMs": {
       "title": "Page timeout (ms)",
       "type": "integer",
       "description": "Maximum time to wait for a single page to load.",
-      "default": 45000,
+      "default": 20000,
       "minimum": 5000,
       "maximum": 120000
     },
