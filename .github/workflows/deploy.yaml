@@ -1,0 +1,74 @@
+name: Test and deploy Actor
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint and import check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint with ruff
+        run: ruff check src
+
+      - name: Import check
+        run: python -c "import src.answers, src.config, src.crawler, src.extractors, src.greenbook, src.main, src.retrieval, src.router, src.utils; print('all modules import')"
+
+      - name: Install Playwright browser
+        run: python -m playwright install --with-deps chromium
+
+      - name: Smoke test the crawler on the NAFDAC homepage
+        run: |
+          python - <<'PY'
+          import asyncio
+          from src.crawler import crawl_site
+          docs = asyncio.run(crawl_site(
+              start_urls=["https://nafdac.gov.ng/"],
+              allowed_domains=["nafdac.gov.ng"],
+              max_pages=1,
+              crawl_depth=0,
+              page_timeout_ms=20000,
+          ))
+          assert docs, "crawler returned no documents"
+          print(f"crawled {len(docs)} page(s)")
+          PY
+
+  deploy:
+    name: Deploy to Apify
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Apify CLI
+        run: npm install -g apify-cli
+
+      - name: Login to Apify
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: apify login --token "$APIFY_TOKEN"
+
+      - name: Push the actor
+        run: apify push
