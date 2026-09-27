@@ -1,6 +1,7 @@
 # NAFDAC Regulatory Assistant (rRx)
 
 She Code Africa x Apify Hackathon -25th September 2026 
+
 **Ask a question in plain English. Get a verified answer straight from NAFDAC's official website — with the source link attached.**
 
 NAFDAC (Nigeria's National Agency for Food and Drug Administration and Control) publishes some of the most important safety and compliance information in the country: product recalls, counterfeit alerts, withdrawn drugs, blacklisted and watchlisted companies, field safety notices for medical devices, drug registration records, fees, and regulatory guidelines.
